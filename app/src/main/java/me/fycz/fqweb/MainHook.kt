@@ -424,7 +424,7 @@ class MainHook : IXposedHookLoadPackage, IXposedHookZygoteInit, IXposedHookInitP
         )
         textview_9.text = Html.fromHtml(
             """
-            <a href="https://github.com/hunyanjie/FQWeb">Github</a>
+            <a href="https://github.com/sunianOvO/FQWeb">Github官网</a>
         """.trimIndent()
         )
         textview_9.movementMethod = LinkMovementMethod.getInstance()

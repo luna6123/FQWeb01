@@ -6,14 +6,18 @@ import android.util.Log
 import androidx.recyclerview.widget.RecyclerView
 import dalvik.system.DexFile
 import de.robv.android.xposed.XposedHelpers
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import me.fycz.fqweb.utils.GlobalApp
 import me.fycz.fqweb.utils.findClass
+import java.io.Closeable
 import java.util.concurrent.ConcurrentHashMap
 
 object Config {
 
     // ===== 调试模式开关 =====
-    private const val DEBUG_MODE = true
+    private const val DEBUG_MODE = false
     private fun log(tag: String, msg: String) {
         if (DEBUG_MODE) Log.d(tag, msg)
     }
@@ -21,12 +25,11 @@ object Config {
     // ===== 固定常量 =====
     const val TRAVERSAL_CONFIG_URL =
         "https://gitee.com/sunianOvO/FQWeb/blob/patch-1/traversal/config.json"
-
     const val DEFAULT_USER_AGENT =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"
 
-    private val dragonClassloader by lazy { 
-        GlobalApp.getClassloader() ?: error("ClassLoader 获取失败") 
+    private val dragonClassloader by lazy {
+        GlobalApp.getClassloader() ?: error("ClassLoader 获取失败")
     }
 
     private val prefs by lazy {
@@ -49,10 +52,8 @@ object Config {
                 @Suppress("DEPRECATION")
                 info.versionCode
             }
-        }.getOrElse {
-            log("ConfigError", "获取版本号失败: ${it.message}")
-            0
-        }
+        }.onFailure { log("ConfigError", "获取版本号失败: ${it.message}") }
+         .getOrDefault(0)
     }
 
     init {
@@ -62,11 +63,15 @@ object Config {
             clearCacheInternal()
             prefs.edit().putInt(versionKey, versionCode).apply()
         }
+        // 异步预热缓存，减少首次访问卡顿
+        CoroutineScope(Dispatchers.Default).launch {
+            preheat()
+        }
     }
 
     // ===== 缓存工具 =====
     private fun getCachedOrFind(key: String, finder: () -> String?): String {
-        cache[key]?.let { 
+        cache[key]?.let {
             log("ConfigCache", "命中内存缓存: $key -> $it")
             return it
         }
@@ -85,14 +90,13 @@ object Config {
         throw ClassNotFoundException("未找到 $key 对应类（版本: $versionCode）")
     }
 
-    // ===== 清空缓存接口 =====
+    // ===== 精准清空缓存（保留版本号） =====
     fun clearCache() {
         clearCacheInternal()
         prefs.edit().putInt(versionKey, versionCode).apply()
         log("ConfigCache", "手动清空缓存完成")
     }
 
-    // 精准清空（保留版本号）
     private fun clearCacheInternal() {
         prefs.edit()
             .remove("settingRecyclerAdapter")
@@ -104,10 +108,10 @@ object Config {
         cache.clear()
     }
 
-    // ===== 高性能扫描工具（包前缀 + 关键字过滤） =====
+    // ===== 高性能扫描工具（包前缀 + 多关键字过滤 + 释放资源） =====
     private fun scanClasses(
         packagePrefix: String,
-        keyword: String? = null,
+        keywords: List<String> = emptyList(),
         match: (Class<*>) -> Boolean
     ): String? {
         return runCatching {
@@ -123,42 +127,57 @@ object Config {
                 val dexFileField = element?.javaClass
                     ?.getDeclaredField("dexFile")?.apply { isAccessible = true }
                 val dexFile = dexFileField?.get(element) as? DexFile ?: continue
-                val entries = dexFile.entries()
-                while (entries.hasMoreElements()) {
-                    val name = entries.nextElement()
-                    if (name.startsWith(packagePrefix) &&
-                        (keyword == null || name.contains(keyword, true))) {
-                        runCatching {
-                            val clazz = name.findClass(dragonClassloader)
-                            if (match(clazz)) {
-                                log("ConfigScan", "Found: $name")
-                                return name
+                dexFile.useSafe { df ->
+                    val entries = df.entries()
+                    while (entries.hasMoreElements()) {
+                        val name = entries.nextElement()
+                        if (name.startsWith(packagePrefix) &&
+                            (keywords.isEmpty() || keywords.all { name.contains(it, true) })
+                        ) {
+                            runCatching {
+                                val clazz = name.findClass(dragonClassloader)
+                                if (match(clazz)) {
+                                    log("ConfigScan", "Found match: $name")
+                                    return name
+                                }
+                            }.onFailure {
+                                log("ConfigError", "加载类失败: $name -> ${it.message}")
                             }
                         }
                     }
                 }
             }
             null
-        }.getOrElse {
+        }.onFailure {
             log("ConfigError", "扫描失败: ${it.message}")
-            null
+        }.getOrNull()
+    }
+
+    // 安全 close DexFile
+    private inline fun <T> DexFile.useSafe(block: (DexFile) -> T): T {
+        return try {
+            block(this)
+        } finally {
+            runCatching { 
+                if (Build.VERSION.SDK_INT >= 26) 
+                    (this as? Closeable)?.close() 
+            }
         }
     }
 
-    // ===== 动态探测类（多回退策略） =====
-    val settingRecyclerAdapterClz: String by lazy {
-        getCachedOrFind("settingRecyclerAdapter") {
-            scanClasses("com.dragon.read", "recyler") { 
-                RecyclerView.Adapter::class.java.isAssignableFrom(it) 
+    // ===== 动态探测类（多候选类名回退） =====
+    val settingRecyclerAdapterClz: String
+        get() = getCachedOrFind("settingRecyclerAdapter") {
+            scanClasses("com.dragon.read", listOf("recyler")) {
+                RecyclerView.Adapter::class.java.isAssignableFrom(it)
             } ?: tryFallback(
                 "com.dragon.read.recyler.c",
                 "com.dragon.read.base.recyler.c"
             )
         }
-    }
 
-    val settingItemQSNClz: String by lazy {
-        getCachedOrFind("settingItemQSN") {
+    val settingItemQSNClz: String
+        get() = getCachedOrFind("settingItemQSN") {
             scanClasses("com.dragon.read.component.biz.impl.mine.settings") { cls ->
                 cls.declaredMethods.any { it.name.length == 1 }
             } ?: tryFallback(
@@ -166,10 +185,9 @@ object Config {
                 "com.dragon.read.component.biz.impl.mine.settings.a.g"
             )
         }
-    }
 
-    val settingItemStrFieldName: String by lazy {
-        prefs.getString("settingItemStrFieldName", null) ?: run {
+    val settingItemStrFieldName: String
+        get() = prefs.getString("settingItemStrFieldName", null) ?: run {
             val settingItemClz = scanClasses("com.dragon.read.pages.mine.settings") { true }
                 ?.findClass(dragonClassloader)
             val fieldName = settingItemClz?.declaredFields
@@ -179,33 +197,36 @@ object Config {
             cache["settingItemStrFieldName"] = fieldName
             fieldName
         }
-    }
 
-    val rpcApiPackage: String by lazy {
-        getCachedOrFind("rpcApiPackage") {
-            scanClasses("com.dragon.read.rpc") { 
-                it.simpleName in listOf("e", "f") 
+    val rpcApiPackage: String
+        get() = getCachedOrFind("rpcApiPackage") {
+            scanClasses("com.dragon.read.rpc") { cls ->
+                cls.simpleName in listOf("e", "f")
             }?.substringBeforeLast(".") ?: "com.dragon.read.rpc"
         }
-    }
 
-    val readerFullRequestClz: String by lazy {
-        getCachedOrFind("readerFullRequestClz") {
+    val readerFullRequestClz: String
+        get() = getCachedOrFind("readerFullRequestClz") {
             val fullReqClz = "$rpcModelPackage.FullRequest".findClass(dragonClassloader)
             val eClz = "$rpcApiPackage.e"
             if (runCatching {
                     XposedHelpers.findMethodExact(eClz, dragonClassloader, "a", fullReqClz)
                 }.isSuccess) eClz else "$rpcApiPackage.f"
         }
-    }
 
     const val rpcModelPackage = "com.dragon.read.rpc.model"
 
-    // ===== 多候选类名尝试 =====
+    // 多候选尝试
     private fun tryFallback(vararg candidates: String): String? {
         for (name in candidates) {
-            if (runCatching { name.findClass(dragonClassloader) }.isSuccess) return name
+            if (runCatching { name.findClass(dragonClassloader) }.isSuccess) {
+                log("ConfigFallback", "使用回退类: $name")
+                return name
+            }
         }
         return null
     }
-}
+
+    // 异步预热关键类，减少首次访问卡顿
+    private fun preheat() {
+        log("ConfigPreheat", "开始

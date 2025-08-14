@@ -14,88 +14,105 @@ object Config {
 
     private val dragonClassloader by lazy { GlobalApp.getClassloader() }
 
-    // 公共辅助方法
-    private fun tryClassOrDefault(primary: String, fallback: String): String =
-        runCatching {
-            primary.findClass(dragonClassloader)
-            primary
-        }.getOrElse { fallback }
+    val settingRecyclerAdapterClz: String by lazy {
+        when (versionCode) {
+            532 -> "com.dragon.read.base.recyler.c"
+            57932 -> "com.dragon.read.recyler.c"
+            else -> {
+                kotlin.runCatching {
+                    "com.dragon.read.recyler.c".findClass(dragonClassloader)
+                    return@lazy "com.dragon.read.recyler.c"
+                }
+                "com.dragon.read.base.recyler.c"
+            }
+        }
+    }
 
-    /** -------- 版本映射表定义 -------- */
-    private val recyclerAdapterMap = mapOf(
-        532 to "com.dragon.read.base.recyler.c",
-        57932 to "com.dragon.read.recyler.c"
-    )
+    val settingItemQSNClz: String by lazy {
+        val prefix = "com.dragon.read.component.biz.impl.mine.settings.a"
+        when (versionCode) {
+            532 -> "$prefix.g"
+            57932 -> "$prefix.k"
+            else -> {
+                kotlin.runCatching {
+                    "$prefix.k".findClass(dragonClassloader)
+                    return@lazy "$prefix.k"
+                }
+                "$prefix.g"
+            }
+        }
+    }
 
-    private val settingItemQSNMap = mapOf(
-        532 to "com.dragon.read.component.biz.impl.mine.settings.a.g",
-        57932 to "com.dragon.read.component.biz.impl.mine.settings.a.k"
-    )
+    val settingItemStrFieldName: String by lazy {
+        when (versionCode) {
+            532 -> "i"
+            57932 -> "i"
+            58332 -> "j"
+            else -> {
+                val settingItemClz =
+                    "com.dragon.read.pages.mine.settings.e".findClass(dragonClassloader)
+                val iField = XposedHelpers.findField(settingItemClz, "i")
+                if (iField.type == CharSequence::class.java) {
+                    "i"
+                } else {
+                    "j"
+                }
+            }
+        }
+    }
 
-    private val settingItemStrFieldMap = mapOf(
-        532 to "i",
-        57932 to "i",
-        58332 to "j"
-    )
+    val readerFullRequestClz: String by lazy {
+        when (versionCode) {
+            532 -> "$rpcApiPackage.e"
+            57932 -> "$rpcApiPackage.e"
+            58332 -> "$rpcApiPackage.f"
+            else -> {
+                val FullRequest =
+                    "$rpcModelPackage.FullRequest".findClass(dragonClassloader)
+                kotlin.runCatching {
+                    XposedHelpers.findMethodExact(
+                        "$rpcApiPackage.e",
+                        dragonClassloader,
+                        "a",
+                        FullRequest
+                    )
+                    return@lazy "$rpcApiPackage.e"
+                }
+                "$rpcApiPackage.f"
+            }
+        }
+    }
 
-    private val readerFullRequestMap = mapOf(
-        532 to "%s.e",
-        57932 to "%s.e",
-        58332 to "%s.f"
-    )
-
-    private val rpcApiPackageMap = mapOf(
-        532 to "com.dragon.read.rpc.a",
-        57932 to "com.dragon.read.rpc"
-    )
+    val rpcApiPackage: String by lazy {
+        val prefix = "com.dragon.read.rpc"
+        when (versionCode) {
+            532 -> "$prefix.a"
+            57932 -> "$prefix.rpc"
+            else -> {
+                kotlin.runCatching {
+                    "$prefix.rpc.a".findClass(dragonClassloader)
+                    return@lazy "$prefix.rpc"
+                }
+                "$prefix.a.a".findClass(dragonClassloader)
+                "$prefix.a"
+            }
+        }
+    }
 
     const val rpcModelPackage = "com.dragon.read.rpc.model"
 
-    /** -------- 版本适配逻辑 -------- */
-    val settingRecyclerAdapterClz by lazy {
-        recyclerAdapterMap[versionCode]
-            ?: tryClassOrDefault("com.dragon.read.recyler.c", "com.dragon.read.base.recyler.c")
+    // 新增：更新逻辑类及方法，用于取代旧的 com.dragon.read.update.*
+    val updateCheckClz: Class<*> by lazy {
+        // 直接定位 com.ss.android.update.ad
+        "com.ss.android.update.ad".findClass(dragonClassloader)
     }
 
-    val settingItemQSNClz by lazy {
-        settingItemQSNMap[versionCode]
-            ?: tryClassOrDefault(
-                "com.dragon.read.component.biz.impl.mine.settings.a.k",
-                "com.dragon.read.component.biz.impl.mine.settings.a.g"
-            )
-    }
-
-    val settingItemStrFieldName by lazy {
-        settingItemStrFieldMap[versionCode] ?: run {
-            val clz = "com.dragon.read.pages.mine.settings.e".findClass(dragonClassloader)
-            val iField = XposedHelpers.findField(clz, "i")
-            if (iField.type == CharSequence::class.java) "i" else "j"
-        }
-    }
-
-    val readerFullRequestClz by lazy {
-        val pkg = rpcApiPackage
-        val fullRequestClz = "$rpcModelPackage.FullRequest".findClass(dragonClassloader)
-        readerFullRequestMap[versionCode]?.format(pkg) ?: runCatching {
-            XposedHelpers.findMethodExact("$pkg.e", dragonClassloader, "a", fullRequestClz)
-            "$pkg.e"
-        }.getOrElse { "$pkg.f" }
-    }
-
-    val rpcApiPackage by lazy {
-        rpcApiPackageMap[versionCode] ?: runCatching {
-            "com.dragon.read.rpc.a".findClass(dragonClassloader)
-            "com.dragon.read.rpc"
-        }.getOrElse {
-            "com.dragon.read.rpc.a.a".findClass(dragonClassloader)
-            "com.dragon.read.rpc.a"
-        }
-    }
+    val updateCheckMethodName: String = "k" // boolean k()
 
     val versionCode: Int by lazy {
         try {
-            val pm = GlobalApp.application!!.packageManager
-            val info = pm.getPackageInfo(GlobalApp.application!!.packageName, 0)
+            val manager = GlobalApp.application!!.packageManager
+            val info = manager.getPackageInfo(GlobalApp.application!!.packageName, 0)
             info.versionCode
         } catch (e: Exception) {
             e.printStackTrace()

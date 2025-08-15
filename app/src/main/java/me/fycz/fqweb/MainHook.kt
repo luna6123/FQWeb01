@@ -500,27 +500,16 @@ class MainHook : IXposedHookLoadPackage, IXposedHookZygoteInit, IXposedHookInitP
         return (dipValue * scale + 0.5f).toInt()
     }
 
-    private fun hookUpdate(classLoader: ClassLoader) {
-        // 新版：com.ss.android.update.ad.k() -> boolean
-        val unhookNew = "com.ss.android.update.ad".replaceMethod(
-            classLoader,
-            "k"
-        ) {
-            // 阻断更新：返回 false
-            false
-        }
-        if (unhookNew != null) return
-
-        // 旧版：com.dragon.read.update.d.a(int, OnUpdateStatusChangedListener)
-        val unhookOld = "com.dragon.read.update.d".replaceMethod(
+private fun hookUpdate(classLoader: ClassLoader) {
+        val unhook = "com.dragon.read.update.d".replaceMethod(
             classLoader,
             "a",
             Int::class.java,
             "com.ss.android.update.OnUpdateStatusChangedListener"
         ) {}
-        if (unhookOld != null) return
-
-        // 旧版重载：a(int)
+        if (unhook != null) {
+            return
+        }
         "com.dragon.read.update.d".replaceMethod(classLoader, "a", Int::class.java) {}
     }
 }

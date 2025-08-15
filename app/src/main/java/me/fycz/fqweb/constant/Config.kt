@@ -1,12 +1,15 @@
 package me.fycz.fqweb.constant
 
-import android.util.Log
-import androidx.recyclerview.widget.RecyclerView
+import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
-import dalvik.system.DexFile
 import me.fycz.fqweb.utils.GlobalApp
 import me.fycz.fqweb.utils.findClass
 
+/**
+ * @author fengyue
+ * @date 2023/5/30 8:35
+ * @description 全局配置中心
+ */
 object Config {
 
     const val TRAVERSAL_CONFIG_URL =
@@ -17,10 +20,98 @@ object Config {
 
     private val dragonClassloader by lazy { GlobalApp.getClassloader() }
 
+    val settingRecyclerAdapterClz: String by lazy {
+        when (versionCode) {
+            532 -> "com.dragon.read.base.recyler.c"
+            57932 -> "com.dragon.read.recyler.c"
+            else -> {
+                kotlin.runCatching {
+                    "com.dragon.read.recyler.c".findClass(dragonClassloader)
+                    return@lazy "com.dragon.read.recyler.c"
+                }
+                "com.dragon.read.base.recyler.c"
+            }
+        }
+    }
+
+    val settingItemQSNClz: String by lazy {
+        val prefix = "com.dragon.read.component.biz.impl.mine.settings.a"
+        when (versionCode) {
+            532 -> "$prefix.g"
+            57932 -> "$prefix.k"
+            else -> {
+                kotlin.runCatching {
+                    "$prefix.k".findClass(dragonClassloader)
+                    return@lazy "$prefix.k"
+                }
+                "$prefix.g"
+            }
+        }
+    }
+
+    val settingItemStrFieldName: String by lazy {
+        when (versionCode) {
+            532 -> "i"
+            57932 -> "i"
+            58332 -> "j"
+            else -> {
+                val settingItemClz =
+                    "com.dragon.read.pages.mine.settings.e".findClass(dragonClassloader)
+                val iField = XposedHelpers.findField(settingItemClz, "i")
+                if (iField.type == CharSequence::class.java) {
+                    "i"
+                } else {
+                    "j"
+                }
+            }
+        }
+    }
+
+    val readerFullRequestClz: String by lazy {
+        when (versionCode) {
+            532 -> "$rpcApiPackage.e"
+            57932 -> "$rpcApiPackage.e"
+            58332 -> "$rpcApiPackage.f"
+            else -> {
+                val FullRequest =
+                    "$rpcModelPackage.FullRequest".findClass(dragonClassloader)
+                kotlin.runCatching {
+                    XposedHelpers.findMethodExact(
+                        "$rpcApiPackage.e",
+                        dragonClassloader,
+                        "a",
+                        FullRequest
+                    )
+                    return@lazy "$rpcApiPackage.e"
+                }
+                "$rpcApiPackage.f"
+            }
+        }
+    }
+
+    val rpcApiPackage: String by lazy {
+        val prefix = "com.dragon.read.rpc"
+        when (versionCode) {
+            532 -> "$prefix.a"
+            57932 -> "$prefix.rpc"
+            else -> {
+                kotlin.runCatching {
+                    "$prefix.rpc.a".findClass(dragonClassloader)
+                    return@lazy "$prefix.rpc"
+                }
+                "$prefix.a.a".findClass(dragonClassloader)
+                "$prefix.a"
+            }
+        }
+    }
+
+    const val rpcModelPackage = "com.dragon.read.rpc.model"
+
     val versionCode: Int by lazy {
         try {
-            val pm = GlobalApp.application!!.packageManager
-            val info = pm.getPackageInfo(GlobalApp.application!!.packageName, 0)
+            val manager =
+                GlobalApp.application!!.packageManager
+            val info = manager.getPackageInfo(GlobalApp.application!!.packageName, 0)
             info.versionCode
         } catch (e: Exception) {
             e.printStackTrace()
@@ -28,106 +119,55 @@ object Config {
         }
     }
 
-    // ------------------ 动态定位核心工具方法 ------------------
+    /**
+     * 自动探测 com.dragon.read.update.d 类及其 a(int, OnUpdateStatusChangedListener) 方法
+     * 解决新版本类名或方法签名变化导致的 NoSuchMethodError
+     */
+    val updateDClassAndMethod by lazy {
+        val result = mutableMapOf<String, Any?>()
 
-    /** 扫描某个包下所有类名 */
-    private fun scanPackage(pkg: String): List<String> {
-        return try {
-            val dex = DexFile(GlobalApp.application!!.packageCodePath)
-            dex.entries().toList().filter { it.startsWith(pkg) }
-        } catch (e: Throwable) {
-            Log.e("Config", "扫描包失败: $pkg", e)
-            emptyList()
-        }
-    }
+        val possibleClasses = listOf(
+            "com.dragon.read.update.d", // 老版本
+            "com.dragon.read.update.UpdateManager", // 假设新版本改名
+            "com.dragon.read.update.c"  // 可能的变动
+        )
 
-    /** 按候选列表 + 校验器匹配类 */
-    private fun findTargetClass(candidates: List<String>, validator: (Class<*>) -> Boolean): String? {
-        // 先尝试已知候选
-        candidates.forEach { name ->
+        var foundClass: Class<*>? = null
+        for (clzName in possibleClasses) {
             runCatching {
-                val clz = name.findClass(dragonClassloader)
-                if (validator(clz)) return name
-            }
-        }
-        // 再扫描包路径兜底
-        val basePkg = candidates.firstOrNull()?.substringBeforeLast(".") ?: return null
-        return scanPackage(basePkg).firstOrNull { name ->
-            runCatching {
-                val clz = name.findClass(dragonClassloader)
-                validator(clz)
-            }.getOrDefault(false)
-        }
-    }
-
-    /** 按候选列表匹配字段名 */
-    private fun findTargetField(className: String, fieldNames: List<String>, type: Class<*>): String? {
-        runCatching {
-            val clz = className.findClass(dragonClassloader)
-            // 先尝试已知字段
-            fieldNames.forEach { fName ->
-                runCatching {
-                    val field = XposedHelpers.findField(clz, fName)
-                    if (field.type == type) return fName
+                foundClass = clzName.findClass(dragonClassloader)
+                if (foundClass != null) {
+                    result["className"] = clzName
+                    break
                 }
             }
-            // 再动态查找
-            clz.declaredFields.firstOrNull { it.type == type }?.let { return it.name }
         }
-        return null
-    }
 
-    // ------------------ 适配属性 ------------------
-
-    val settingRecyclerAdapterClz: String by lazy {
-        findTargetClass(
-            listOf(
-                "com.dragon.read.base.recyler.c",
-                "com.dragon.read.recyler.c"
-            )
-        ) { RecyclerView.Adapter::class.java.isAssignableFrom(it) }
-            ?: error("找不到 settingRecyclerAdapter 类")
-    }
-
-    val settingItemQSNClz: String by lazy {
-        val prefix = "com.dragon.read.component.biz.impl.mine.settings.a"
-        findTargetClass(
-            listOf("$prefix.g", "$prefix.k")
-        ) { clz ->
-            // 假设特征是含有 CharSequence 字段
-            clz.declaredFields.any { f -> f.type == CharSequence::class.java }
-        } ?: error("找不到 settingItemQSN 类")
-    }
-
-    val settingItemStrFieldName: String by lazy {
-        findTargetField(
-            "com.dragon.read.pages.mine.settings.e",
-            listOf("i", "j"),
-            CharSequence::class.java
-        ) ?: error("找不到 settingItemStr 字段")
-    }
-
-    val readerFullRequestClz: String by lazy {
-        val FullRequest = "$rpcModelPackage.FullRequest".findClass(dragonClassloader)
-        findTargetClass(
-            listOf("$rpcApiPackage.e", "$rpcApiPackage.f")
-        ) { clz ->
+        foundClass?.let { targetClz ->
             runCatching {
-                XposedHelpers.findMethodExact(clz.name, dragonClassloader, "a", FullRequest)
-                true
-            }.getOrDefault(false)
-        } ?: error("找不到 readerFullRequest 类")
-    }
+                val listenerClz =
+                    "com.ss.android.update.OnUpdateStatusChangedListener".findClass(dragonClassloader)
+                val method = XposedHelpers.findMethodExact(
+                    targetClz,
+                    "a",
+                    Int::class.java,
+                    listenerClz
+                )
+                result["method"] = method
+            }.onFailure {
+                targetClz.declaredMethods.forEach { m ->
+                    val params = m.parameterTypes
+                    if (params.size == 2 &&
+                        params[0] == Int::class.java &&
+                        params[1].name == "com.ss.android.update.OnUpdateStatusChangedListener"
+                    ) {
+                        result["method"] = m
+                        XposedBridge.log("FQWeb: 自动匹配到 update.d 方法: ${m.name}")
+                    }
+                }
+            }
+        }
 
-    val rpcApiPackage: String by lazy {
-        val prefix = "com.dragon.read.rpc"
-        // 校验：包下是否含有 e 或 f 类
-        findTargetClass(
-            listOf("$prefix.a", "$prefix.rpc")
-        ) { clz ->
-            clz.name.endsWith(".e") || clz.name.endsWith(".f")
-        }?.substringBeforeLast(".") ?: error("找不到 rpcApiPackage")
+        result
     }
-
-    const val rpcModelPackage = "com.dragon.read.rpc.model"
 }

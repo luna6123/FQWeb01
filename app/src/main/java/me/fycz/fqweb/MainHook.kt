@@ -500,25 +500,17 @@ class MainHook : IXposedHookLoadPackage, IXposedHookZygoteInit, IXposedHookInitP
         return (dipValue * scale + 0.5f).toInt()
     }
 
-private fun hookUpdate(classLoader: ClassLoader) {
-    val updateInfo = Config.updateDClassAndMethod
-    val updateClzName = updateInfo["className"] as? String
-    val updateMethod = updateInfo["method"] as? java.lang.reflect.Method
-
-    if (updateClzName != null && updateMethod != null) {
-        val unhook = updateClzName.replaceMethod(
+    private fun hookUpdate(classLoader: ClassLoader) {
+        val unhook = "com.dragon.read.update.d".replaceMethod(
             classLoader,
-            updateMethod.name,
-            *updateMethod.parameterTypes
+            "a",
+            Int::class.java,
+            "com.ss.android.update.OnUpdateStatusChangedListener"
         ) {}
         if (unhook != null) {
             return
         }
-        // 如果找到类名，但方法匹配失败，尝试 Hook 只有 int 参数的版本
-        updateClzName.replaceMethod(classLoader, updateMethod.name, Int::class.java) {}
-    } else {
-        XposedBridge.log("FQWeb: 未能找到 update.d 对应的类或方法，版本=${Config.versionCode}")
+        "com.dragon.read.update.d".replaceMethod(classLoader, "a", Int::class.java) {}
     }
-}
 
 }

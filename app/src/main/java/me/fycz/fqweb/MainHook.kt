@@ -501,23 +501,51 @@ class MainHook : IXposedHookLoadPackage, IXposedHookZygoteInit, IXposedHookInitP
     }
 
 private fun hookUpdate(classLoader: ClassLoader) {
+    // 已知旧版本直达 Hook（示例）
+    when (Config.versionCode) {
+        532 -> {
+            if (tryHook("com.dragon.read.update.d", classLoader, "a", Int::class.java,
+                "com.ss.android.update.OnUpdateStatusChangedListener".findClass(classLoader)
+            )) return
+        }
+    }
+
     val updateInfo = Config.updateDClassAndMethod
     val updateClzName = updateInfo["className"] as? String
     val updateMethod = updateInfo["method"] as? java.lang.reflect.Method
 
-    if (updateClzName != null && updateMethod != null) {
-        val unhook = updateClzName.replaceMethod(
-            classLoader,
-            updateMethod.name,
-            *updateMethod.parameterTypes
-        ) {}
-        if (unhook != null) {
-            return
+    if (updateClzName.isNullOrBlank()) {
+        XposedBridge.log("FQWeb: ❌ 未找到 update 类，version=${Config.versionCode}")
+        return
+    }
+
+    if (updateMethod != null) {
+        // 精确 Hook
+        if (tryHook(updateClzName, classLoader, updateMethod.name, *updateMethod.parameterTypes)) return
+        // 降级为 int 参数
+        if (updateMethod.parameterTypes.size != 1) {
+            tryHook(updateClzName, classLoader, updateMethod.name, Int::class.java)
         }
-        // 如果找到类名，但方法匹配失败，尝试 Hook 只有 int 参数的版本
-        updateClzName.replaceMethod(classLoader, updateMethod.name, Int::class.java) {}
     } else {
-        XposedBridge.log("FQWeb: 未能找到 update.d 对应的类或方法，版本=${Config.versionCode}")
+        XposedBridge.log("FQWeb: ℹ️ 找到类名但未匹配到方法，尝试默认 a(Int)")
+        tryHook(updateClzName, classLoader, "a", Int::class.java)
+    }
+}
+
+// 通用 Hook 封装，带异常保护和完整类名打印
+private fun tryHook(clzName: String, loader: ClassLoader, methodName: String, vararg params: Class<*>): Boolean {
+    return runCatching {
+        val result = clzName.replaceMethod(loader, methodName, *params) {}
+        if (result != null) {
+            XposedBridge.log("FQWeb: ✅ Hook 成功 $clzName.$methodName(${params.joinToString { it.name }})")
+            true
+        } else {
+            XposedBridge.log("FQWeb: ⚠️ Hook 失败 $clzName.$methodName(${params.joinToString { it.name }})")
+            false
+        }
+    }.getOrElse {
+        XposedBridge.log("FQWeb: ❌ Hook 异常 $clzName.$methodName → ${it.message}")
+        false
     }
 }
 

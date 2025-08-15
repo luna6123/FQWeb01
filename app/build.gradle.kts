@@ -84,9 +84,6 @@ dependencies {
     //webServer
     implementation("org.nanohttpd:nanohttpd:2.3.1")
 
-    //frpc
-    implementation(files("libs/frpclib.aar"))
-
     //config
     implementation "androidx.recyclerview:recyclerview:1.3.2"
 

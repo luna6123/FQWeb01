@@ -1,12 +1,19 @@
-import com.android.build.OutputFile
+import java.util.Properties
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
 }
 
-val keyProps = `java.util`.Properties()
+val keyProps = Properties()
 val keyPropsFile: File = rootProject.file("keystore/keystore.properties")
+// 如果keystore目录不存在，创建它
+if (!keyPropsFile.parentFile.exists()) {
+    keyPropsFile.parentFile.mkdirs()
+    // 创建一个空的keystore.properties文件
+    keyPropsFile.createNewFile()
+}
 if (keyPropsFile.exists()) {
     keyProps.load(`java.io`.FileInputStream(keyPropsFile))
 }
@@ -45,7 +52,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            if (keyPropsFile.exists()) {
+            if (keyPropsFile.exists() && keyProps.getProperty("storeFile", "").isNotEmpty()) {
                 signingConfig = signingConfigs.getByName("myConfig")
             }
         }
@@ -63,7 +70,7 @@ android {
     android.applicationVariants.all {
         outputs.map { it as com.android.build.gradle.internal.api.BaseVariantOutputImpl }
             .forEach {
-                val abi = it.getFilter(OutputFile.ABI) ?: "universal"
+                val abi = it.getFilter("ABI") ?: "universal"
                 val fileName = "FQWeb_Frpc_v${defaultConfig.versionName}_$abi.apk"
                 it.outputFileName = fileName
             }
@@ -73,8 +80,10 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions {
-        jvmTarget = "17"
+    kotlin {
+        compilerOptions {
+            jvmTarget.set(JvmTarget.JVM_17)
+        }
     }
 }
 

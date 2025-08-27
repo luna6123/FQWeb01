@@ -1,34 +1,20 @@
 package me.fycz.fqweb.web
 
 import android.widget.Toast
-import de.robv.android.xposed.XposedHelpers
 import frpclib.Frpclib
 import me.fycz.fqweb.BuildConfig
-import me.fycz.fqweb.MainHook.Companion.moduleRes
 import me.fycz.fqweb.constant.Config.TRAVERSAL_CONFIG_URL
 import me.fycz.fqweb.entity.NATTraversalConfig
 import me.fycz.fqweb.entity.ServerConfig
-import me.fycz.fqweb.utils.GlobalApp
-import me.fycz.fqweb.utils.HttpUtils
-import me.fycz.fqweb.utils.JsonUtils
-import me.fycz.fqweb.utils.SPUtils
-import me.fycz.fqweb.utils.ToastUtils
-import me.fycz.fqweb.utils.log
+import me.fycz.fqweb.utils.*
 import java.io.File
 import java.lang.RuntimeException
 
-/**
- * @author fengyue
- * @date 2023/7/24 13:53
- * @description
- */
 class FrpcServer {
     private var myThread: Thread? = null
-
     private val retry: Int = 1
 
     var traversalConfig: NATTraversalConfig? = null
-
     var currentServer: ServerConfig? = null
 
     private val configFile: File by lazy {
@@ -38,7 +24,7 @@ class FrpcServer {
     fun start(manual: Boolean = false) {
         if (myThread?.isAlive == true) return
         if (manual) ToastUtils.toast("正在启动内网穿透服务...")
-        initConfig() {
+        initConfig {
             myThread = Thread {
                 try {
                     Frpclib.run(configFile.absolutePath)
@@ -53,9 +39,7 @@ class FrpcServer {
             }.apply {
                 isDaemon = true
                 name = "Frp Client"
-            }.also {
-                it.start()
-            }
+            }.also { it.start() }
         }
     }
 
@@ -132,5 +116,24 @@ class FrpcServer {
 
     fun isAlive(): Boolean {
         return myThread?.isAlive == true
+    }
+
+    /**
+     * 停止内网穿透服务
+     */
+    @Synchronized
+    fun stop() {
+        try {
+            // 如果 frpclib 有停止方法，可以在这里调用
+            // Frpclib.stop() // 假设存在
+
+            // 中断线程
+            myThread?.interrupt()
+            myThread = null
+
+            ToastUtils.toast("内网穿透服务已停止")
+        } catch (e: Throwable) {
+            log(e)
+        }
     }
 }
